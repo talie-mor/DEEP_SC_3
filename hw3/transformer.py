@@ -26,7 +26,51 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     values, attention = None, None
 
     # ====== YOUR CODE: ======
-    pass
+    multihead = len(q.shape)==4
+    attention = torch.full((batch_size, q.shape[1], seq_len, seq_len), float("-inf")) if multihead\
+            else torch.full((batch_size, seq_len, seq_len), float("-inf"))
+    attention = attention.to(q.device)
+
+    left_idx = torch.Tensor([i for i in range(window_size//2) for _ in range((window_size-window_size//2)+i+1)]).to(dtype=torch.int)
+
+    if window_size//2 < seq_len-(window_size//2):
+        mid_idx = torch.Tensor([i for i in range(window_size//2, seq_len-(window_size//2)) for _ in range(window_size+1)]).to(dtype=torch.int)
+    else:
+        mid_idx = torch.empty(0, dtype=torch.int)
+
+    right_idx = torch.Tensor([i+seq_len for i in range(window_size//2) for _ in range(i,(window_size-window_size//2)+3)]).to(dtype=torch.int)
+
+    query_idx = torch.cat((left_idx, mid_idx, right_idx))
+
+    '''is_multihead = q.dim() == 4
+    half_window_size = window_size // 2
+    minus_inf = float('-inf')
+
+    # ### Initiallize with -inf ###
+    if is_multihead:
+        num_heads = q.shape[1]
+        attention = torch.full((batch_size, num_heads, seq_len, seq_len), minus_inf).to(q.device)
+    else:
+        attention = torch.full((batch_size, seq_len, seq_len), minus_inf).to(q.device)
+
+    # ### Create the indices for the query matrix ###
+    input = torch.arange(0, half_window_size)
+    repeats = torch.arange(half_window_size + 1, window_size + 1)
+    query_first_indices = torch.repeat_interleave(input, repeats)
+
+    if half_window_size < seq_len - half_window_size:
+        input = torch.arange(half_window_size, seq_len - half_window_size)
+        repeats = torch.full(input.shape, window_size + 1)
+        query_middle_indices = torch.repeat_interleave(input, repeats)
+    else:
+        query_middle_indices = torch.empty(0, dtype=torch.int)
+
+    input = torch.arange(seq_len - half_window_size, seq_len)
+    repeats = torch.arange(half_window_size + 1, window_size + 1)
+    repeats = torch.flip(repeats, dims=[0])
+    query_last_indices = torch.repeat_interleave(input, repeats)
+
+    query_indices = torch.cat((query_first_indices, query_middle_indices, query_last_indices))'''
     # ======================
 
     return values, attention

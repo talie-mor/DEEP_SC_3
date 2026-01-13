@@ -109,7 +109,7 @@ class Trainer(abc.ABC):
                 save_checkpoint = True
             else:
                 epochs_without_improvement += 1
-                if epochs_without_improvement > early_stopping:
+                if early_stopping and epochs_without_improvement > early_stopping:
                     return FitResult(actual_num_epochs, train_loss, train_acc, test_loss, test_acc)
 
             # Save model checkpoint if requested
@@ -365,7 +365,9 @@ class TransformerEncoderTrainer(Trainer):
             # TODO:
             #  fill out the testing loop.
             # ====== YOUR CODE: ======
-            pass
+            pred = torch.round(torch.sigmoid(self.model(input_ids, attention_mask)))
+            num_correct = torch.sum(pred == label)
+            loss = self.loss_fn(pred.squeeze(1), label)
             # ========================
 
 

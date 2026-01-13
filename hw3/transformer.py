@@ -3,8 +3,6 @@ import torch.nn as nn
 import math
 
 
-# Yuval
-
 
 def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     '''
@@ -31,46 +29,66 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
             else torch.full((batch_size, seq_len, seq_len), float("-inf"))
     attention = attention.to(q.device)
 
-    left_idx = torch.Tensor([i for i in range(window_size//2) for _ in range((window_size-window_size//2)+i+1)]).to(dtype=torch.int)
+    # QUERIES
+    left_idx = torch.Tensor([i for i in range(window_size//2) for _ in range((window_size-window_size//2)+i+1)]).to(dtype=torch.long)
 
     if window_size//2 < seq_len-(window_size//2):
-        mid_idx = torch.Tensor([i for i in range(window_size//2, seq_len-(window_size//2)) for _ in range(window_size+1)]).to(dtype=torch.int)
+        mid_idx = torch.Tensor([i for i in range(window_size//2, seq_len-(window_size//2)) for _ in range(window_size+1)]).to(dtype=torch.long)
     else:
-        mid_idx = torch.empty(0, dtype=torch.int)
+        mid_idx = torch.empty(0, dtype=torch.long)
 
-    right_idx = torch.Tensor([i+seq_len for i in range(window_size//2) for _ in range(i,(window_size-window_size//2)+3)]).to(dtype=torch.int)
+    right = torch.arange(0, window_size//2) + seq_len - window_size//2
+    repeat = torch.arange(window_size//2 + 1, window_size + 1)
+    repeat = torch.flip(repeat, dims=[0])
+    right_idx = torch.repeat_interleave(right, repeat)
+    # right_idx = torch.Tensor([i+seq_len-window_size//2 for i in range(window_size//2) for _ in range(i-1,(window_size-window_size//2)+1)]).to(dtype=torch.long)
 
     query_idx = torch.cat((left_idx, mid_idx, right_idx))
 
-    '''is_multihead = q.dim() == 4
-    half_window_size = window_size // 2
-    minus_inf = float('-inf')
+    # KEYS
+    idx = torch.arange(window_size).unsqueeze(0)
+    left = idx * (idx < torch.arange(window_size//2, window_size + 1).unsqueeze(1))
+    left = torch.cat((left[:0], left[1:]))#[0 + 1:]
+    left_mask = torch.full_like(left, False, dtype=torch.bool)
+    left_nozero = (left != 0).nonzero(as_tuple=False)
+    left_mask[left_nozero[:,0], left_nozero[:,1]] = True
+    left_mask[:,0] = True
+    left_idx = left[left_mask]
 
-    # ### Initiallize with -inf ###
-    if is_multihead:
-        num_heads = q.shape[1]
-        attention = torch.full((batch_size, num_heads, seq_len, seq_len), minus_inf).to(q.device)
+    if window_size//2 < seq_len-window_size//2:
+        init_idx = torch.arange(window_size//2, seq_len - window_size//2) - window_size//2
+        mid_idx = torch.arange(window_size + 1).unsqueeze(0) + init_idx.unsqueeze(1)
+        mid_idx = torch.flatten(mid_idx)
     else:
-        attention = torch.full((batch_size, seq_len, seq_len), minus_inf).to(q.device)
+        mid_idx = torch.empty(0, dtype=torch.int)
 
-    # ### Create the indices for the query matrix ###
-    input = torch.arange(0, half_window_size)
-    repeats = torch.arange(half_window_size + 1, window_size + 1)
-    query_first_indices = torch.repeat_interleave(input, repeats)
+    init_idx = seq_len-window_size+torch.arange(window_size//2)
+    right_idx = torch.arange(window_size).unsqueeze(0) - torch.arange(window_size//2).unsqueeze(1) + init_idx.unsqueeze(1)
+    right_mask = torch.triu(torch.ones_like(right_idx)).bool()
+    right_idx = right_idx[right_mask]
+    #right_idx = torch.Tensor([i+(window_size+1) for j in range(1,window_size) for i in range(j,window_size+1)]).to(dtype=torch.long)
 
-    if half_window_size < seq_len - half_window_size:
-        input = torch.arange(half_window_size, seq_len - half_window_size)
-        repeats = torch.full(input.shape, window_size + 1)
-        query_middle_indices = torch.repeat_interleave(input, repeats)
-    else:
-        query_middle_indices = torch.empty(0, dtype=torch.int)
+    key_idx = torch.cat((left_idx, mid_idx, right_idx))
 
-    input = torch.arange(seq_len - half_window_size, seq_len)
-    repeats = torch.arange(half_window_size + 1, window_size + 1)
-    repeats = torch.flip(repeats, dims=[0])
-    query_last_indices = torch.repeat_interleave(input, repeats)
+    # CALCULATE
+    einsum = torch.einsum('...ij,...jk->...ik',
+                          q[:, ..., query_idx, :].unsqueeze(-2),
+                          k[:, ..., key_idx, :].unsqueeze(-1))
+    attention[:, ..., query_idx, key_idx] = einsum.squeeze(-1).squeeze(-1)
 
-    query_indices = torch.cat((query_first_indices, query_middle_indices, query_last_indices))'''
+    # PADDING
+    if padding_mask is not None:
+        if multihead:
+            padding_mask = padding_mask.unsqueeze(-2)
+        padding_mask = padding_mask.unsqueeze(-2)
+        attention.masked_fill_(padding_mask == 0, float('-inf'))
+        attention.masked_fill_(padding_mask.transpose(-1, -2) == 0, float('-inf'))
+
+    attention = attention / math.sqrt(embed_dim)
+    with torch.no_grad():
+        attention = torch.softmax(attention, dim=-1)
+    attention[torch.isnan(attention)] = 0.0
+    values = torch.matmul(attention, v)
     # ======================
 
     return values, attention
@@ -113,7 +131,7 @@ class MultiHeadAttention(nn.Module):
         # Determine value outputs
         # call the sliding window attention function you implemented
         # ====== YOUR CODE: ======
-        pass
+        values, attention = sliding_window_attention(q, k, v, self.window_size, padding_mask)
         # ========================
 
         values = values.permute(0, 2, 1, 3) # [Batch, SeqLen, Head, Dims]
@@ -190,7 +208,9 @@ class EncoderLayer(nn.Module):
         '''
 
         # ====== YOUR CODE: ======
-        pass
+        after_attn = self.norm1(self.dropout(self.self_attn(x, padding_mask)) + x)
+        after_feed = self.dropout(self.feed_forward(after_attn))
+        x = self.norm2(after_feed + after_attn)
         # ========================
         
         return x
@@ -232,7 +252,13 @@ class Encoder(nn.Module):
         output = None
 
         # ====== YOUR CODE: ======
-        pass
+        pos_encoded = self.dropout(self.positional_encoding(self.encoder_embedding(sentence)))
+        encoded = pos_encoded
+
+        for encoder_layer in self.encoder_layers:
+            encoded = encoder_layer(encoded, padding_mask)
+
+        output = self.classification_mlp(encoded[:, 0])
         # ========================
         
         

@@ -129,7 +129,7 @@ class VAE(nn.Module):
         # ====== YOUR CODE: ======
         h = self.features_encoder(x).reshape(-1, self.n_features)
         mu, log_sigma2 = (self.linmu(h), self.linsigma2(h))
-        z = (torch.randn_like(mu) * torch.pow(torch.exp(log_sigma2), 2) + mu).to(self.device)
+        z = (torch.randn_like(mu) * torch.pow(torch.exp(log_sigma2), 2) + mu).to(log_sigma2.device)
         # ========================
         return z, mu, log_sigma2
 
